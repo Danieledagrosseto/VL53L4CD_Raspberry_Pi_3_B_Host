@@ -60,12 +60,6 @@ def read_sense_hat(sense: SenseHat) -> dict:
     compass      = sense.get_compass_raw()
 
     return {
-        # HTS221
-        "temperature_hts221_c": round(sense.get_temperature(), 2),
-        "humidity_pct":          round(sense.get_humidity(), 2),
-        # LPS25H
-        "temperature_lps25h_c": round(sense.get_temperature_from_pressure(), 2),
-        "pressure_mbar":         round(sense.get_pressure(), 2),
         # LSM9DS1 — orientation
         "pitch_deg":  round(orientation["pitch"], 2),
         "roll_deg":   round(orientation["roll"],  2),
@@ -86,16 +80,9 @@ def read_sense_hat(sense: SenseHat) -> dict:
 
 
 def update_led_status(sense: SenseHat, data: dict):
-    """Show a status colour on the Sense HAT LED matrix corner pixel."""
-    temp = data.get("temperature_hts221_c", 25.0)
-    if temp > 50.0:
-        colour = COLOUR_ERROR
-    elif temp > 35.0:
-        colour = COLOUR_WARN
-    else:
-        colour = COLOUR_OK
+    """Show runtime heartbeat on the Sense HAT LED matrix corner pixel."""
     # Light a single corner pixel as a heartbeat indicator
-    sense.set_pixel(7, 7, colour)
+    sense.set_pixel(7, 7, COLOUR_OK)
 
 
 def _startup_blink_worker(sense: SenseHat, stop_event: threading.Event, interval_s: float = 0.25):
@@ -218,11 +205,7 @@ def main():
                 update_led_status(sense, data)
 
                 log.info(
-                    "Temp: %.1f °C | Humidity: %.1f %% | Pressure: %.1f mbar | "
                     "Pitch: %.1f° | Roll: %.1f° | Yaw: %.1f°",
-                    data["temperature_hts221_c"],
-                    data["humidity_pct"],
-                    data["pressure_mbar"],
                     data["pitch_deg"],
                     data["roll_deg"],
                     data["yaw_deg"],

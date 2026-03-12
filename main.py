@@ -16,7 +16,7 @@ import logging
 import signal
 
 from sense_hat import SenseHat
-from i2c_sensor import I2CSensor, VL53L4CD, scan_i2c_bus
+from i2c_sensor import I2CSensor, VL53L4CD, scan_i2c_bus, discover_vl53l4cd_sensors
 
 # ── Logging ──────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -96,18 +96,16 @@ def update_led_status(sense: SenseHat, data: dict):
     sense.set_pixel(7, 7, colour)
 
 
-# ── External I2C sensor example ───────────────────────────────────────────────
+# ── External I2C sensor setup ────────────────────────────────────────────────
 
 def setup_external_sensors(bus: int) -> list[I2CSensor]:
     """
-    Register any external I2C sensors wired to the Pi.
-    Extend this list with your own sensor addresses and read logic.
+    Auto-discover all VL53L4CD sensors present on the I2C bus.
+    Each responding address that passes the config handshake is registered.
     """
-    sensors: list[I2CSensor] = []
-
-    # VL53L4CD breakout board running custom slave firmware at 0x70.
-    sensors.append(VL53L4CD(bus=bus, address=0x70))
-
+    sensors: list[I2CSensor] = discover_vl53l4cd_sensors(bus)
+    if not sensors:
+        log.warning("No VL53L4CD sensors found on bus %d", bus)
     return sensors
 
 

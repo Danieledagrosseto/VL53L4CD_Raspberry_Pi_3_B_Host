@@ -37,6 +37,10 @@ def scan_i2c_bus(bus: int = 1) -> list[int]:
     return found
 
 
+# Sense HAT onboard IC addresses — never probed as external sensors
+_SENSE_HAT_ADDRESSES: frozenset[int] = frozenset({0x1C, 0x46, 0x5C, 0x5F, 0x6A})
+
+
 # ── Base sensor class ─────────────────────────────────────────────────────────
 
 @dataclass
@@ -328,3 +332,35 @@ class VL53L4CD(I2CSensor):
         """Read response buffer from command protocol (register pointer 0x00)."""
         self.open()
         return bytes(self._smbus.read_i2c_block_data(self.address, 0x00, length))
+
+
+# ── Multi-sensor discovery ────────────────────────────────────────────────────
+
+def discover_vl53l4cd_sensors(bus: int = 1) -> list[VL53L4CD]:
+    """
+    Scan I2C bus and return a VL53L4CD instance for every responding address
+    that replies to the Read Config command (0x04) with a self-consistent
+    13-byte payload (i2c_address byte matches queried address, firmware_rev
+    is not 0xFF).
+
+    Sense HAT onboard addresses are skipped automatically.
+    """
+    sensors: list[VL53L4CD] = []
+    for addr in scan_i2c_bus(bus):
+        if addr in _SENSE_HAT_ADDRESSES:
+            continue
+        sensor = VL53L4CD(bus=bus, address=addr)
+        try:
+            cfg = sensor.read_config()
+            if cfg["i2c_address"] == addr and cfg["firmware_rev"] != 0xFF:
+                log.info(
+                    "Discovered VL53L4CD @ %s (fw_rev=%d tb=%dms inter=%dms)",
+                    hex(addr), cfg["firmware_rev"],
+                    cfg["time_budget_ms"], cfg["inter_measurement_ms"],
+                )
+                sensors.append(sensor)
+            else:
+                sensor.close()
+        except OSError:
+            sensor.close()
+    return sensors

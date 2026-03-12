@@ -29,7 +29,7 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 # ── Constants ─────────────────────────────────────────────────────────────────
-POLL_INTERVAL_SEC = 2.0   # How often to read sensors (seconds)
+POLL_INTERVAL_SEC = 0.1   # How often to read sensors (seconds)
 I2C_BUS = 1               # Raspberry Pi hardware I2C bus
 
 # Sense HAT LED colours (R, G, B)

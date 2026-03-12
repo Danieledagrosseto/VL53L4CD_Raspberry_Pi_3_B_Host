@@ -1,0 +1,11 @@
+# I2C Sensors Host Firmware — Python dependencies
+# Install on the Raspberry Pi with:
+#   pip install -r requirements.txt
+#
+# Note: sense-hat may require system packages first:
+#   sudo apt install sense-hat python3-smbus i2c-tools
+
+sense-hat>=2.6.0
+smbus2>=0.4.3
+RPi.GPIO>=0.7.1
+gpiozero>=2.0

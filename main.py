@@ -14,6 +14,8 @@ Run with: python3 main.py
 import time
 import logging
 import signal
+import threading
+from typing import Optional
 
 from sense_hat import SenseHat
 from i2c_sensor import I2CSensor, VL53L4CD, scan_i2c_bus, discover_vl53l4cd_sensors
@@ -96,6 +98,31 @@ def update_led_status(sense: SenseHat, data: dict):
     sense.set_pixel(7, 7, colour)
 
 
+def _startup_blink_worker(sense: SenseHat, stop_event: threading.Event, interval_s: float = 0.25):
+    """Blink the LED matrix red while initialisation is in progress."""
+    show_red = True
+    while not stop_event.is_set():
+        try:
+            sense.clear(COLOUR_ERROR if show_red else COLOUR_OFF)
+        except OSError as exc:
+            log.error("Startup LED update failed: %s", exc)
+            break
+        show_red = not show_red
+        stop_event.wait(interval_s)
+
+
+def wait_for_joystick_press(sense: SenseHat) -> bool:
+    """Block until joystick press is detected or shutdown is requested."""
+    log.info("Waiting for joystick press to start acquisition loop...")
+    while _running:
+        for event in sense.stick.get_events():
+            if event.action == "pressed":
+                log.info("Joystick pressed (%s). Starting loop.", event.direction)
+                return True
+        time.sleep(0.05)
+    return False
+
+
 # ── External I2C sensor setup ────────────────────────────────────────────────
 
 def setup_external_sensors(bus: int) -> list[I2CSensor]:
@@ -114,26 +141,40 @@ def setup_external_sensors(bus: int) -> list[I2CSensor]:
 def main():
     log.info("=== I2C Sensor Host Firmware starting ===")
 
-    # Scan the I2C bus and log discovered devices
-    log.info("Scanning I2C bus %d ...", I2C_BUS)
-    discovered = scan_i2c_bus(I2C_BUS)
-    if discovered:
-        log.info("Devices found: %s", [hex(a) for a in discovered])
-    else:
-        log.warning("No I2C devices found on bus %d", I2C_BUS)
+    sense = None
+    external_sensors: list[I2CSensor] = []
+    startup_ok = False
+    blink_stop_event: Optional[threading.Event] = None
+    blink_thread: Optional[threading.Thread] = None
 
-    # Initialise Sense HAT
-    sense = SenseHat()
-    sense.clear()
-    log.info("Sense HAT initialised.")
+    try:
+        # Initialise Sense HAT first so we can display startup status.
+        sense = SenseHat()
+        sense.clear()
+        log.info("Sense HAT initialised.")
 
-    # Initialise any external sensors
-    external_sensors = setup_external_sensors(I2C_BUS)
-    if external_sensors:
-        log.info("External sensors registered: %s", [s.name for s in external_sensors])
-        for sensor in external_sensors:
-            if isinstance(sensor, VL53L4CD):
-                try:
+        blink_stop_event = threading.Event()
+        blink_thread = threading.Thread(
+            target=_startup_blink_worker,
+            args=(sense, blink_stop_event),
+            daemon=True,
+        )
+        blink_thread.start()
+
+        # Scan the I2C bus and log discovered devices
+        log.info("Scanning I2C bus %d ...", I2C_BUS)
+        discovered = scan_i2c_bus(I2C_BUS)
+        if discovered:
+            log.info("Devices found: %s", [hex(a) for a in discovered])
+        else:
+            log.warning("No I2C devices found on bus %d", I2C_BUS)
+
+        # Initialise any external sensors
+        external_sensors = setup_external_sensors(I2C_BUS)
+        if external_sensors:
+            log.info("External sensors registered: %s", [s.name for s in external_sensors])
+            for sensor in external_sensors:
+                if isinstance(sensor, VL53L4CD):
                     cfg = sensor.read_config()
                     log.info(
                         "[VL53L4CD @ %s] tb=%dms inter=%dms fw_rev=%d",
@@ -142,8 +183,32 @@ def main():
                         cfg["inter_measurement_ms"],
                         cfg["firmware_rev"],
                     )
-                except OSError as exc:
-                    log.error("[VL53L4CD] Config read failed: %s", exc)
+
+        startup_ok = True
+    except Exception as exc:
+        log.error("Initialisation failed: %s", exc)
+    finally:
+        if blink_stop_event is not None:
+            blink_stop_event.set()
+        if blink_thread is not None:
+            blink_thread.join(timeout=1.0)
+
+    if sense is None:
+        log.critical("Sense HAT unavailable. Cannot continue.")
+        return
+
+    if not startup_ok:
+        sense.clear(COLOUR_ERROR)
+        log.error("Startup checks failed. LED set to solid red.")
+        return
+
+    sense.clear(COLOUR_OK)
+    if not wait_for_joystick_press(sense):
+        sense.clear(COLOUR_OFF)
+        log.info("Startup aborted before acquisition loop.")
+        return
+
+    sense.clear(COLOUR_OFF)
 
     try:
         while _running:

@@ -38,6 +38,7 @@ POLL_INTERVAL_SEC = 0.1   # How often to read sensors (seconds)
 I2C_BUS = 1               # Raspberry Pi hardware I2C bus
 DEFAULT_START_MODE = os.getenv("START_MODE", "joystick").strip().lower()
 VALID_START_MODES = {"joystick", "immediate"}
+IDLE_STATUS_LOG_SEC = 5.0
 
 # Sense HAT LED colours (R, G, B)
 COLOUR_OK    = (0, 64, 0)
@@ -219,7 +220,10 @@ def main(start_mode: str):
         log.info("Immediate mode selected. Starting acquisition loop.")
 
     try:
+        next_idle_log_at = time.monotonic() + IDLE_STATUS_LOG_SEC
         while _running:
+            did_log_sensor_data = False
+
             # --- Read Sense HAT ---
             if sense is not None:
                 try:
@@ -232,6 +236,7 @@ def main(start_mode: str):
                         data["roll_deg"],
                         data["yaw_deg"],
                     )
+                    did_log_sensor_data = True
                 except OSError as exc:
                     log.error("Sense HAT read error: %s", exc)
 
@@ -248,14 +253,29 @@ def main(start_mode: str):
                                 result["range_status"],
                                 result["sigma_mm_raw"],
                             )
+                            did_log_sensor_data = True
                         else:
                             log.warning("[VL53L4CD @ %s] No valid reading", hex(sensor.address))
                     else:
                         reading = sensor.read()
                         log.info("[%s @ %s] raw bytes: %s",
                                  sensor.name, hex(sensor.address), reading.hex())
+                        did_log_sensor_data = True
                 except OSError as exc:
                     log.error("[%s] I2C error: %s", sensor.name, exc)
+
+            if not did_log_sensor_data and time.monotonic() >= next_idle_log_at:
+                if sense is None and not external_sensors:
+                    log.warning(
+                        "Loop alive, but no active sensors: Sense HAT unavailable and no external I2C sensors discovered."
+                    )
+                elif sense is None:
+                    log.info("Loop alive: Sense HAT unavailable, external sensor polling active.")
+                elif not external_sensors:
+                    log.info("Loop alive: Sense HAT active, no external sensors discovered.")
+                else:
+                    log.info("Loop alive: polling sensors.")
+                next_idle_log_at = time.monotonic() + IDLE_STATUS_LOG_SEC
 
             time.sleep(POLL_INTERVAL_SEC)
 

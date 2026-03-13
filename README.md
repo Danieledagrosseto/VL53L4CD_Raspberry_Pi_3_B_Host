@@ -58,6 +58,27 @@ Expected output should show addresses for the Sense HAT sensors and the VL53L4CD
 python3 main.py
 ```
 
+### Startup modes
+
+The script supports two startup flows:
+
+1. **Check sensors, then wait for joystick press**
+
+```bash
+python3 main.py --start-mode joystick
+```
+
+1. **Check sensors, then start acquisition immediately**
+
+```bash
+python3 main.py --start-mode immediate
+```
+
+If `--start-mode` is omitted, the default is `joystick`.
+You can also set the default with environment variable `START_MODE` (`joystick` or `immediate`).
+
+In `immediate` mode, external VL53L4CD acquisition continues even when Sense HAT is not connected.
+
 The program will:
 1. Scan I2C bus 1 and log all discovered devices.
 2. Auto-discover every VL53L4CD sensor present on the bus (any number, any address).

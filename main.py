@@ -8,16 +8,21 @@ Sense HAT onboard sensors (all on I2C bus 1):
   LSM9DS1 @ 0x1C  - Magnetometer
   LSM9DS1 @ 0x6A  - Accelerometer & Gyroscope
 
-Run with: python3 main.py
+Run with: python3 main.py [--start-mode joystick|immediate]
 """
 
 import time
 import logging
 import signal
 import threading
-from typing import Optional
+import argparse
+import os
+from typing import Optional, Any
 
-from sense_hat import SenseHat
+try:
+    from sense_hat import SenseHat
+except ImportError:
+    SenseHat = Any
 from i2c_sensor import I2CSensor, VL53L4CD, scan_i2c_bus, discover_vl53l4cd_sensors
 
 # ── Logging ──────────────────────────────────────────────────────────────────
@@ -31,6 +36,8 @@ log = logging.getLogger(__name__)
 # ── Constants ─────────────────────────────────────────────────────────────────
 POLL_INTERVAL_SEC = 0.1   # How often to read sensors (seconds)
 I2C_BUS = 1               # Raspberry Pi hardware I2C bus
+DEFAULT_START_MODE = os.getenv("START_MODE", "joystick").strip().lower()
+VALID_START_MODES = {"joystick", "immediate"}
 
 # Sense HAT LED colours (R, G, B)
 COLOUR_OK    = (0, 64, 0)
@@ -110,6 +117,19 @@ def wait_for_joystick_press(sense: SenseHat) -> bool:
     return False
 
 
+def resolve_start_mode(cli_mode: Optional[str]) -> str:
+    """Resolve startup mode from CLI and environment with validation."""
+    mode = (cli_mode or DEFAULT_START_MODE).strip().lower()
+    if mode not in VALID_START_MODES:
+        log.warning(
+            "Invalid start mode '%s'. Falling back to 'joystick'. Valid modes: %s",
+            mode,
+            sorted(VALID_START_MODES),
+        )
+        return "joystick"
+    return mode
+
+
 # ── External I2C sensor setup ────────────────────────────────────────────────
 
 def setup_external_sensors(bus: int) -> list[I2CSensor]:
@@ -125,28 +145,32 @@ def setup_external_sensors(bus: int) -> list[I2CSensor]:
 
 # ── Main loop ─────────────────────────────────────────────────────────────────
 
-def main():
+def main(start_mode: str):
     log.info("=== I2C Sensor Host Firmware starting ===")
+    log.info("Startup mode: %s", start_mode)
 
     sense = None
     external_sensors: list[I2CSensor] = []
-    startup_ok = False
     blink_stop_event: Optional[threading.Event] = None
     blink_thread: Optional[threading.Thread] = None
 
     try:
-        # Initialise Sense HAT first so we can display startup status.
-        sense = SenseHat()
-        sense.clear()
-        log.info("Sense HAT initialised.")
+        # Initialise Sense HAT if present; external sensors must still run without it.
+        try:
+            sense = SenseHat()
+            sense.clear()
+            log.info("Sense HAT initialised.")
 
-        blink_stop_event = threading.Event()
-        blink_thread = threading.Thread(
-            target=_startup_blink_worker,
-            args=(sense, blink_stop_event),
-            daemon=True,
-        )
-        blink_thread.start()
+            blink_stop_event = threading.Event()
+            blink_thread = threading.Thread(
+                target=_startup_blink_worker,
+                args=(sense, blink_stop_event),
+                daemon=True,
+            )
+            blink_thread.start()
+        except Exception as exc:
+            sense = None
+            log.warning("Sense HAT unavailable (%s). Continuing without Sense HAT.", exc)
 
         # Scan the I2C bus and log discovered devices
         log.info("Scanning I2C bus %d ...", I2C_BUS)
@@ -170,48 +194,46 @@ def main():
                         cfg["inter_measurement_ms"],
                         cfg["firmware_rev"],
                     )
-
-        startup_ok = True
     except Exception as exc:
         log.error("Initialisation failed: %s", exc)
+        if sense is not None:
+            sense.clear(COLOUR_ERROR)
+        return
     finally:
         if blink_stop_event is not None:
             blink_stop_event.set()
         if blink_thread is not None:
             blink_thread.join(timeout=1.0)
 
-    if sense is None:
-        log.critical("Sense HAT unavailable. Cannot continue.")
-        return
-
-    if not startup_ok:
-        sense.clear(COLOUR_ERROR)
-        log.error("Startup checks failed. LED set to solid red.")
-        return
-
-    sense.clear(COLOUR_OK)
-    if not wait_for_joystick_press(sense):
-        sense.clear(COLOUR_OFF)
-        log.info("Startup aborted before acquisition loop.")
-        return
-
-    sense.clear(COLOUR_OFF)
+    if start_mode == "joystick":
+        if sense is None:
+            log.warning("Joystick mode requested, but Sense HAT is unavailable. Starting loop immediately.")
+        else:
+            sense.clear(COLOUR_OK)
+            if not wait_for_joystick_press(sense):
+                sense.clear(COLOUR_OFF)
+                log.info("Startup aborted before acquisition loop.")
+                return
+            sense.clear(COLOUR_OFF)
+    else:
+        log.info("Immediate mode selected. Starting acquisition loop.")
 
     try:
         while _running:
             # --- Read Sense HAT ---
-            try:
-                data = read_sense_hat(sense)
-                update_led_status(sense, data)
+            if sense is not None:
+                try:
+                    data = read_sense_hat(sense)
+                    update_led_status(sense, data)
 
-                log.info(
-                    "Pitch: %.1f° | Roll: %.1f° | Yaw: %.1f°",
-                    data["pitch_deg"],
-                    data["roll_deg"],
-                    data["yaw_deg"],
-                )
-            except OSError as exc:
-                log.error("Sense HAT read error: %s", exc)
+                    log.info(
+                        "Pitch: %.1f° | Roll: %.1f° | Yaw: %.1f°",
+                        data["pitch_deg"],
+                        data["roll_deg"],
+                        data["yaw_deg"],
+                    )
+                except OSError as exc:
+                    log.error("Sense HAT read error: %s", exc)
 
             # --- Read external sensors ---
             for sensor in external_sensors:
@@ -238,9 +260,18 @@ def main():
             time.sleep(POLL_INTERVAL_SEC)
 
     finally:
-        sense.clear()
+        if sense is not None:
+            sense.clear()
         log.info("LED cleared. Firmware stopped.")
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description="I2C Sensors Host Firmware")
+    parser.add_argument(
+        "--start-mode",
+        choices=sorted(VALID_START_MODES),
+        default=None,
+        help="Startup mode: joystick waits for press, immediate starts loop right away.",
+    )
+    args = parser.parse_args()
+    main(start_mode=resolve_start_mode(args.start_mode))

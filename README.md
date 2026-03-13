@@ -18,6 +18,7 @@ Python host firmware that reads onboard Sense HAT sensors and an external VL53L4
 main.py                     # Main entry point — sensor loop and Sense HAT LED status
 i2c_sensor.py               # Generic I2C base class, ADS1115 ADC helper, VL53L4CD driver,
                             #   and discover_vl53l4cd_sensors() auto-discovery helper
+VL53L4CD_fast_setup.py      # Interactive CLI tool to configure connected VL53L4CD sensors
 I2C_COMMANDS_VL53L4CD.md    # I2C command reference for the VL53L4CD slave firmware
 requirements.txt            # Python dependencies
 ```
@@ -119,6 +120,28 @@ The program will:
 | `sigma_mm` | mm |
 | `signal_kcps` | kcps |
 | `ambient_kcps` | kcps |
+
+## VL53L4CD Fast Setup
+
+`VL53L4CD_fast_setup.py` is an interactive command-line utility to configure any connected VL53L4CD sensor on the fly.
+Run it on the Raspberry Pi from the project folder:
+
+```bash
+python3 VL53L4CD_fast_setup.py
+```
+
+At startup it scans the I2C bus and lists every discovered sensor with its current firmware revision, time budget, inter-measurement period, and offset. Then it presents a menu:
+
+| Option | Action |
+|---|---|
+| `1` | Change I2C address (valid range `0x08`–`0x7F`, saved to EEPROM) |
+| `2` | Change time budget in ms (`10`–`200`); inter-measurement is always forced to `0` |
+| `3` | Run offset calibration — prompts for target distance (mm) and sample count |
+| `4` | Read and display all stored configuration fields for a sensor |
+| `0` | Exit |
+
+Decimal or hex input is accepted everywhere (e.g. `42` or `0x2A`).
+All changes are saved to sensor EEPROM and applied immediately.
 
 ## Multiple VL53L4CD Sensors
 

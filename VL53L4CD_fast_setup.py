@@ -5,6 +5,7 @@ Menu:
 1) Change I2C address
 2) Change time budget (intermeasurement is always forced to 0)
 3) Change offset (runs offset calibration)
+4) Read stored configuration
 """
 
 from __future__ import annotations
@@ -18,7 +19,7 @@ except Exception as exc:  # pragma: no cover - platform dependent import
     smbus2 = None  # type: ignore[assignment]
     _SMBUS2_IMPORT_ERROR = exc
 
-from i2c_sensor import VL53L4CD
+from i2c_sensor import VL53L4CD, discover_vl53l4cd_sensors, scan_i2c_bus
 
 
 MIN_I2C_ADDR = 0x08
@@ -189,17 +190,67 @@ def _change_offset(bus_num: int) -> None:
     )
 
 
+def _read_config(bus_num: int) -> None:
+    addr = _prompt_int(
+        f"Sensor address [{hex(MIN_I2C_ADDR)}..{hex(MAX_I2C_ADDR)}]: ",
+        MIN_I2C_ADDR,
+        MAX_I2C_ADDR,
+    )
+    sensor = VL53L4CD(bus=bus_num, address=addr)
+    try:
+        cfg = sensor.read_config()
+    except OSError as exc:
+        print(f"Read config failed at {hex(addr)}: {exc}")
+        return
+
+    print(f"  i2c_address      : {hex(cfg['i2c_address'])}")
+    print(f"  time_budget_ms   : {cfg['time_budget_ms']} ms")
+    print(f"  inter_measure_ms : {cfg['inter_measurement_ms']} ms")
+    print(f"  offset_mm        : {cfg['offset_mm']} mm")
+    print(f"  xtalk_kcps       : {cfg['xtalk_kcps']}")
+    print(f"  sigma_threshold  : {cfg['sigma_threshold_mm']} mm")
+    print(f"  signal_threshold : {cfg['signal_threshold_kcps']} kcps")
+    print(f"  firmware_rev     : {cfg['firmware_rev']}")
+
+
 def _show_menu() -> None:
     print("\nVL53L4CD Fast Setup")
     print("1) Change address")
     print("2) Change time_budget (intermeasurement always 0)")
     print("3) Change offset")
+    print("4) Read stored configuration")
     print("0) Exit")
+
+
+def _list_devices(bus_num: int) -> None:
+    """Scan the bus and print every discovered VL53L4CD with its address."""
+    print(f"Scanning I2C bus {bus_num} for VL53L4CD sensors...")
+    sensors = discover_vl53l4cd_sensors(bus_num)
+    if not sensors:
+        # Fall back to raw bus scan so any address at least shows up.
+        raw = scan_i2c_bus(bus_num)
+        if raw:
+            print(f"  No VL53L4CD confirmed, but raw I2C addresses found: {[hex(a) for a in raw]}")
+        else:
+            print("  No I2C devices found.")
+        return
+    for s in sensors:
+        try:
+            cfg = s.read_config()
+            print(
+                f"  {hex(s.address)}  fw_rev={cfg['firmware_rev']}  "
+                f"tb={cfg['time_budget_ms']}ms  "
+                f"inter={cfg['inter_measurement_ms']}ms  "
+                f"offset={cfg['offset_mm']}mm"
+            )
+        except OSError as exc:
+            print(f"  {hex(s.address)}  (read error: {exc})")
 
 
 def main() -> None:
     print("VL53L4CD fast setup utility")
     bus_num = _prompt_int_with_default("I2C bus number [0..10] (default 1): ", 1, 0, 10)
+    _list_devices(bus_num)
 
     while True:
         _show_menu()
@@ -211,6 +262,8 @@ def main() -> None:
             _change_time_budget(bus_num)
         elif choice == "3":
             _change_offset(bus_num)
+        elif choice == "4":
+            _read_config(bus_num)
         elif choice == "0":
             print("Exiting.")
             return

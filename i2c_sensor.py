@@ -9,11 +9,24 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Any, Optional
 
-import smbus2
+try:
+    import smbus2  # type: ignore[import-not-found]
+    _SMBUS2_IMPORT_ERROR = None
+except Exception as exc:  # pragma: no cover - platform dependent import
+    smbus2 = None  # type: ignore[assignment]
+    _SMBUS2_IMPORT_ERROR = exc
 
 log = logging.getLogger(__name__)
+
+
+def _ensure_smbus2_available() -> None:
+    if smbus2 is None:
+        raise RuntimeError(
+            "smbus2 is unavailable on this platform/interpreter. "
+            "Run this project on Raspberry Pi Linux with smbus2 installed."
+        ) from _SMBUS2_IMPORT_ERROR
 
 
 # ── Bus utilities ─────────────────────────────────────────────────────────────
@@ -23,6 +36,10 @@ def scan_i2c_bus(bus: int = 1) -> list[int]:
     Scan an I2C bus and return a list of responding device addresses (7-bit).
     Mirrors the behaviour of `i2cdetect -y <bus>`.
     """
+    if smbus2 is None:
+        log.warning("scan_i2c_bus skipped: smbus2 unavailable in this environment.")
+        return []
+
     found = []
     try:
         with smbus2.SMBus(bus) as b:
@@ -55,13 +72,14 @@ class I2CSensor:
     bus:     int
     address: int
     name:    str = "I2CSensor"
-    _smbus:  Optional[smbus2.SMBus] = field(default=None, init=False, repr=False)
+    _smbus:  Optional[Any] = field(default=None, init=False, repr=False)
 
     # ── Connection lifecycle ──────────────────────────────────────────────────
 
     def open(self) -> None:
         """Open the underlying SMBus handle. Called automatically on first use."""
         if self._smbus is None:
+            _ensure_smbus2_available()
             self._smbus = smbus2.SMBus(self.bus)
             log.debug("[%s] opened bus %d", self.name, self.bus)
 

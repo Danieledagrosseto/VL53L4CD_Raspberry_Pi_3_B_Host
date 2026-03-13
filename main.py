@@ -90,7 +90,10 @@ def read_sense_hat(sense: SenseHat) -> dict:
 def update_led_status(sense: SenseHat, data: dict):
     """Show runtime heartbeat on the Sense HAT LED matrix corner pixel."""
     # Light a single corner pixel as a heartbeat indicator
-    sense.set_pixel(7, 7, COLOUR_OK)
+    try:
+        sense.set_pixel(7, 7, COLOUR_OK)
+    except OSError:
+        pass
 
 
 def _startup_blink_worker(sense: SenseHat, stop_event: threading.Event, interval_s: float = 0.25):
@@ -159,16 +162,19 @@ def main(start_mode: str):
         # Initialise Sense HAT if present; external sensors must still run without it.
         try:
             sense = SenseHat()
-            sense.clear()
             log.info("Sense HAT initialised.")
 
-            blink_stop_event = threading.Event()
-            blink_thread = threading.Thread(
-                target=_startup_blink_worker,
-                args=(sense, blink_stop_event),
-                daemon=True,
-            )
-            blink_thread.start()
+            try:
+                sense.clear()
+                blink_stop_event = threading.Event()
+                blink_thread = threading.Thread(
+                    target=_startup_blink_worker,
+                    args=(sense, blink_stop_event),
+                    daemon=True,
+                )
+                blink_thread.start()
+            except OSError as exc:
+                log.warning("Sense HAT LED unavailable (%s). Continuing without LED status.", exc)
         except Exception as exc:
             sense = None
             log.warning("Sense HAT unavailable (%s). Continuing without Sense HAT.", exc)

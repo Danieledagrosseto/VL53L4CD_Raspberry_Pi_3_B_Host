@@ -235,6 +235,10 @@ class VL53L4CD(I2CSensor):
     CMD_RESTORE_DEFAULTS = 0x05
     CMD_SET_THRESHOLDS = 0x07
     CMD_RESTART = 0x08
+    MAX_RANGE_MM = 1300
+
+    # ST status values with gravity=Warning in the VL53L4CD table.
+    _WARNING_STATUSES: frozenset[int] = frozenset({1, 2, 6})
 
     def __init__(self, bus: int = 1, address: int = 0x70):
         super().__init__(bus=bus, address=address, name="VL53L4CD")
@@ -282,8 +286,12 @@ class VL53L4CD(I2CSensor):
         timeout_s: float = 0.5,
     ) -> dict:
         """
-        Trigger one range in mm, poll until range_status == 0 (data ready),
-        then return parsed result.
+        Trigger one range in mm and poll until one of these terminal states:
+        - status 0 (valid) or warning statuses 1/2/6 -> return measured distance
+        - status 3 (below detection threshold) -> return 0 mm
+        - status 4 (phase out of valid limit) -> return MAX_RANGE_MM
+
+        Any other error status keeps polling until timeout.
 
         Returns None values if the measurement times out or stays invalid.
         """
@@ -298,10 +306,30 @@ class VL53L4CD(I2CSensor):
             buf = self.read(length=15)
             range_status = buf[2]
             distance = (buf[0] << 8) | buf[1]
-            # status 0 = valid, distance 0xFFFF = buffer not yet filled
-            if range_status == 0 and distance != 0xFFFF:
+
+            # distance 0xFFFF means the response buffer is not yet filled.
+            if distance == 0xFFFF:
+                time.sleep(poll_interval_s)
+                continue
+
+            if range_status == 3:
+                data = bytearray(buf)
+                data[0] = 0x00
+                data[1] = 0x00
+                break
+
+            if range_status == 4:
+                # Out-of-limit phase is treated as sensor max range.
+                data = bytearray(buf)
+                data[0] = (self.MAX_RANGE_MM >> 8) & 0xFF
+                data[1] = self.MAX_RANGE_MM & 0xFF
+                break
+
+            # Accept valid and warning statuses.
+            if range_status == 0 or range_status in self._WARNING_STATUSES:
                 data = buf
                 break
+
             time.sleep(poll_interval_s)
 
         if data is None:

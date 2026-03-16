@@ -59,6 +59,34 @@ Expected output should show addresses for the Sense HAT sensors and the VL53L4CD
 python3 main.py
 ```
 
+## Sync Project To Raspberry Pi (From Windows)
+
+From this project folder, run:
+
+```powershell
+.\sync_to_pi.ps1
+```
+
+Optional parameters:
+
+```powershell
+# Custom host/user/path
+.\sync_to_pi.ps1 -PiHost 192.168.1.50 -PiUser pi -TargetDir ~/projects/vl53
+
+# Custom virtual environment directory on Pi (default: .venv)
+.\sync_to_pi.ps1 -PiHost 192.168.1.50 -PiUser pi -TargetDir ~/projects/vl53 -VenvDir .venv
+
+# Also install/update dependencies on the Pi
+.\sync_to_pi.ps1 -InstallRequirements
+
+# Sync + install requirements + run main.py
+.\sync_to_pi.ps1 -InstallRequirements -RunMain
+```
+
+The script copies all project files except `.git`, `.venv`, `.vscode`, and `__pycache__`.
+When `-InstallRequirements` is used, the script creates/updates a virtual environment in the target directory (default `.venv`) and installs dependencies there.
+When `-RunMain` is used, it automatically runs `main.py` with the venv Python if available, otherwise falls back to system `python3`.
+
 ### Startup modes
 
 The script supports two startup flows:

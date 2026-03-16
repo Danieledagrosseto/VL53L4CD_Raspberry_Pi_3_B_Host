@@ -242,6 +242,13 @@ class VL53L4CD(I2CSensor):
 
     def __init__(self, bus: int = 1, address: int = 0x70):
         super().__init__(bus=bus, address=address, name="VL53L4CD")
+        self._detected_time_budget_ms: Optional[int] = None
+
+    def _get_dynamic_timeout_s(self, fallback_s: float = 0.5) -> float:
+        """Return timeout based on detected time budget plus 20 ms."""
+        if self._detected_time_budget_ms is None:
+            return fallback_s
+        return max((self._detected_time_budget_ms + 20) / 1000.0, 0.02)
 
     def _write_cmd(self, command: int, payload: list[int] | None = None) -> None:
         """Write a command byte + optional payload to the sensor."""
@@ -261,6 +268,7 @@ class VL53L4CD(I2CSensor):
         """Read 13-byte device configuration buffer (command 0x04)."""
         self._write_cmd(self.CMD_READ_CONFIG)
         data = self.read(length=13)
+        self._detected_time_budget_ms = data[1]
         offset = (data[4] << 8) | data[5]
         if offset > 32767:
             offset -= 65536
@@ -283,7 +291,7 @@ class VL53L4CD(I2CSensor):
         self,
         initial_wait_s: float = 0.05,
         poll_interval_s: float = 0.005,
-        timeout_s: float = 0.5,
+        timeout_s: Optional[float] = None,
     ) -> dict:
         """
         Trigger one range in mm and poll until one of these terminal states:
@@ -300,7 +308,8 @@ class VL53L4CD(I2CSensor):
         # Initial wait — let sensor start the measurement before we start polling
         time.sleep(initial_wait_s)
 
-        deadline = time.monotonic() + timeout_s
+        resolved_timeout_s = timeout_s if timeout_s is not None else self._get_dynamic_timeout_s()
+        deadline = time.monotonic() + resolved_timeout_s
         data = None
         while time.monotonic() < deadline:
             buf = self.read(length=15)
@@ -333,7 +342,10 @@ class VL53L4CD(I2CSensor):
             time.sleep(poll_interval_s)
 
         if data is None:
-            log.warning("[VL53L4CD] Ranging timed out — data not ready within %.1f s", timeout_s)
+            log.warning(
+                "[VL53L4CD] Ranging timed out — data not ready within %.3f s",
+                resolved_timeout_s,
+            )
             return {
                 "distance_mm": None,
                 "range_status": None,

@@ -1,6 +1,4 @@
 param(
-dir
-param(
     [string]$PiHost = "raspberrypi.local",
     [string]$PiUser = "pi",
     [string]$TargetDir = "~/VL53L4CD_Raspberry_Pi_3_B+_Host",

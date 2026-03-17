@@ -298,7 +298,7 @@ class VL53L4CD(I2CSensor):
         - status 0 (valid) or warning statuses 1/2/6 -> return measured distance
         - status 3 (below detection threshold) -> return 0 mm
         - status 4 (phase out of valid limit) -> return MAX_RANGE_MM
-        - timeout or persistent invalid statuses -> return MAX_RANGE_MM
+        - timeout or persistent invalid statuses -> return MAX_RANGE_MM with status 13
 
         Any other error status keeps polling until timeout.
 
@@ -345,16 +345,11 @@ class VL53L4CD(I2CSensor):
             time.sleep(poll_interval_s)
 
         if data is None:
-            log.warning(
-                "[VL53L4CD] Ranging timed out — data not ready within %.3f s",
-                resolved_timeout_s,
-            )
             # Keep last diagnostics when possible, but force fallback distance.
             data = bytearray(last_buf) if last_buf is not None else bytearray(15)
             data[0] = (self.MAX_RANGE_MM >> 8) & 0xFF
             data[1] = self.MAX_RANGE_MM & 0xFF
-            if last_buf is None:
-                data[2] = 4
+            data[2] = 13
 
         return {
             "distance_mm": (data[0] << 8) | data[1],

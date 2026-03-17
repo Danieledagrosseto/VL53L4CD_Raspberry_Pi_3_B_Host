@@ -152,6 +152,9 @@ The program will:
 | `signal_kcps` | kcps |
 | `ambient_kcps` | kcps |
 
+When a ranging cycle times out or stays invalid, the host returns `distance_mm = 1300`
+and sets `range_status = 13` (timeout flag).
+
 ## VL53L4CD Fast Setup
 
 `VL53L4CD_fast_setup.py` is an interactive command-line utility to configure any connected VL53L4CD sensor on the fly.

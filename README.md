@@ -64,8 +64,11 @@ python3 main.py
 From this project folder, run:
 
 ```powershell
-.\sync_to_pi.ps1
+.\sync_to_pi.ps1 -PiHost 192.168.1.7 -PiUser daniele
 ```
+
+Note: if `raspberrypi.local` is not resolvable on your Windows network, always pass
+`-PiHost` explicitly (as above).
 
 Optional parameters:
 
@@ -77,10 +80,10 @@ Optional parameters:
 .\sync_to_pi.ps1 -PiHost 192.168.1.50 -PiUser pi -TargetDir ~/projects/vl53 -VenvDir .venv
 
 # Also install/update dependencies on the Pi
-.\sync_to_pi.ps1 -InstallRequirements
+.\sync_to_pi.ps1 -PiHost 192.168.1.7 -PiUser daniele -InstallRequirements
 
 # Sync + install requirements + run main.py
-.\sync_to_pi.ps1 -InstallRequirements -RunMain
+.\sync_to_pi.ps1 -PiHost 192.168.1.7 -PiUser daniele -InstallRequirements -RunMain
 ```
 
 The script copies all project files except `.git`, `.venv`, `.vscode`, and `__pycache__`.

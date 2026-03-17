@@ -251,17 +251,14 @@ def main(start_mode: str):
                 try:
                     if isinstance(sensor, VL53L4CD):
                         result = sensor.read_ranging_result()
-                        if result["distance_mm"] is not None:
-                            log.info(
-                                "[VL53L4CD @ %s] distance=%d mm status=%d sigma=%d",
-                                hex(sensor.address),
-                                result["distance_mm"],
-                                result["range_status"],
-                                result["sigma_mm_raw"],
-                            )
-                            did_log_sensor_data = True
-                        else:
-                            log.warning("[VL53L4CD @ %s] No valid reading", hex(sensor.address))
+                        log.info(
+                            "[VL53L4CD @ %s] distance=%d mm status=%d sigma=%d",
+                            hex(sensor.address),
+                            result["distance_mm"],
+                            result["range_status"],
+                            result["sigma_mm_raw"],
+                        )
+                        did_log_sensor_data = True
                     else:
                         reading = sensor.read()
                         log.info("[%s @ %s] raw bytes: %s",

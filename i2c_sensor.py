@@ -298,10 +298,11 @@ class VL53L4CD(I2CSensor):
         - status 0 (valid) or warning statuses 1/2/6 -> return measured distance
         - status 3 (below detection threshold) -> return 0 mm
         - status 4 (phase out of valid limit) -> return MAX_RANGE_MM
+        - timeout or persistent invalid statuses -> return MAX_RANGE_MM
 
         Any other error status keeps polling until timeout.
 
-        Returns None values if the measurement times out or stays invalid.
+        Always returns a parsed result payload.
         """
         self.trigger_ranging(self.UNIT_MM)
 
@@ -311,8 +312,10 @@ class VL53L4CD(I2CSensor):
         resolved_timeout_s = timeout_s if timeout_s is not None else self._get_dynamic_timeout_s()
         deadline = time.monotonic() + resolved_timeout_s
         data = None
+        last_buf = None
         while time.monotonic() < deadline:
             buf = self.read(length=15)
+            last_buf = buf
             range_status = buf[2]
             distance = (buf[0] << 8) | buf[1]
 
@@ -346,16 +349,12 @@ class VL53L4CD(I2CSensor):
                 "[VL53L4CD] Ranging timed out — data not ready within %.3f s",
                 resolved_timeout_s,
             )
-            return {
-                "distance_mm": None,
-                "range_status": None,
-                "signal_rate_kcps_raw": None,
-                "ambient_rate_kcps_raw": None,
-                "sigma_mm_raw": None,
-                "ambient_per_spad_raw": None,
-                "signal_per_spad_raw": None,
-                "num_spads_raw": None,
-            }
+            # Keep last diagnostics when possible, but force fallback distance.
+            data = bytearray(last_buf) if last_buf is not None else bytearray(15)
+            data[0] = (self.MAX_RANGE_MM >> 8) & 0xFF
+            data[1] = self.MAX_RANGE_MM & 0xFF
+            if last_buf is None:
+                data[2] = 4
 
         return {
             "distance_mm": (data[0] << 8) | data[1],

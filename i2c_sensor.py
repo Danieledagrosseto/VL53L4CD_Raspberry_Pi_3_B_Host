@@ -7,6 +7,9 @@ to subclass for specific sensor ICs.
 from __future__ import annotations
 
 import logging
+import os
+from pathlib import Path
+import re
 import time
 from dataclasses import dataclass, field
 from typing import Any, Optional
@@ -27,6 +30,81 @@ def _ensure_smbus2_available() -> None:
             "smbus2 is unavailable on this platform/interpreter. "
             "Run this project on Raspberry Pi Linux with smbus2 installed."
         ) from _SMBUS2_IMPORT_ERROR
+
+
+def ensure_i2c_arm_baudrate(target_hz: int = 400_000) -> bool:
+    """
+    Ensure Raspberry Pi I2C controller baudrate is configured in boot config.
+
+    Returns True only when config.txt was updated. A reboot is required for
+    changes to take effect.
+    """
+    if os.name != "posix":
+        return False
+
+    config_candidates = (Path("/boot/firmware/config.txt"), Path("/boot/config.txt"))
+    config_path = next((p for p in config_candidates if p.exists()), None)
+    if config_path is None:
+        log.warning("I2C config file not found in /boot; cannot enforce baudrate.")
+        return False
+
+    try:
+        lines = config_path.read_text(encoding="utf-8").splitlines()
+    except OSError as exc:
+        log.warning("Unable to read %s: %s", config_path, exc)
+        return False
+
+    updated = False
+    found_i2c_dtparam = False
+    new_lines: list[str] = []
+
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("#") or not stripped.startswith("dtparam="):
+            new_lines.append(line)
+            continue
+
+        if "i2c_arm" not in stripped:
+            new_lines.append(line)
+            continue
+
+        found_i2c_dtparam = True
+        if "i2c_arm_baudrate=" in stripped:
+            new_line = re.sub(r"i2c_arm_baudrate=\d+", f"i2c_arm_baudrate={target_hz}", line)
+            updated = updated or (new_line != line)
+            new_lines.append(new_line)
+            continue
+
+        if "i2c_arm=on" in stripped:
+            new_line = f"{line},i2c_arm_baudrate={target_hz}"
+            updated = True
+            new_lines.append(new_line)
+            continue
+
+        new_lines.append(line)
+
+    if not found_i2c_dtparam:
+        new_lines.append(f"dtparam=i2c_arm=on,i2c_arm_baudrate={target_hz}")
+        updated = True
+
+    if not updated:
+        return False
+
+    try:
+        config_path.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
+    except PermissionError:
+        log.warning(
+            "Permission denied writing %s. Run this program with sudo to set I2C to %d Hz.",
+            config_path,
+            target_hz,
+        )
+        return False
+    except OSError as exc:
+        log.warning("Unable to update %s: %s", config_path, exc)
+        return False
+
+    log.info("Updated %s with i2c_arm_baudrate=%d", config_path, target_hz)
+    return True
 
 
 # ── Bus utilities ─────────────────────────────────────────────────────────────

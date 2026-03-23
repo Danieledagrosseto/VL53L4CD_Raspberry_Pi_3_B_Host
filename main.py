@@ -23,7 +23,13 @@ try:
     from sense_hat import SenseHat
 except ImportError:
     SenseHat = Any
-from i2c_sensor import I2CSensor, VL53L4CD, scan_i2c_bus, discover_vl53l4cd_sensors
+from i2c_sensor import (
+    I2CSensor,
+    VL53L4CD,
+    scan_i2c_bus,
+    discover_vl53l4cd_sensors,
+    ensure_i2c_arm_baudrate,
+)
 
 # ── Logging ──────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -36,6 +42,7 @@ log = logging.getLogger(__name__)
 # ── Constants ─────────────────────────────────────────────────────────────────
 POLL_INTERVAL_SEC = 0.1   # How often to read sensors (seconds)
 I2C_BUS = 1               # Raspberry Pi hardware I2C bus
+I2C_SPEED_HZ = 400_000
 DEFAULT_START_MODE = os.getenv("START_MODE", "joystick").strip().lower()
 VALID_START_MODES = {"joystick", "immediate"}
 IDLE_STATUS_LOG_SEC = 5.0
@@ -152,6 +159,12 @@ def setup_external_sensors(bus: int) -> list[I2CSensor]:
 def main(start_mode: str):
     log.info("=== I2C Sensor Host Firmware starting ===")
     log.info("Startup mode: %s", start_mode)
+
+    if ensure_i2c_arm_baudrate(I2C_SPEED_HZ):
+        log.warning(
+            "I2C baudrate updated to %d Hz in boot config. Reboot Raspberry Pi to apply.",
+            I2C_SPEED_HZ,
+        )
 
     sense = None
     external_sensors: list[I2CSensor] = []

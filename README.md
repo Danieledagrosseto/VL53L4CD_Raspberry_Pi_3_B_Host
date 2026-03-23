@@ -59,6 +59,11 @@ Expected output should show addresses for the Sense HAT sensors and the VL53L4CD
 python3 main.py
 ```
 
+On startup, the host now ensures Raspberry Pi boot config contains
+`dtparam=i2c_arm=on,i2c_arm_baudrate=400000` (400 kHz Fast-mode). If the file
+is updated, reboot is required for the new I2C speed to take effect.
+Write access to `/boot/.../config.txt` may require running with `sudo`.
+
 ## Sync Project To Raspberry Pi (From Windows)
 
 From this project folder, run:

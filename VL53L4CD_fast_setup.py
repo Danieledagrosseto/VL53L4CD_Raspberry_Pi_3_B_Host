@@ -19,7 +19,12 @@ except Exception as exc:  # pragma: no cover - platform dependent import
     smbus2 = None  # type: ignore[assignment]
     _SMBUS2_IMPORT_ERROR = exc
 
-from i2c_sensor import VL53L4CD, discover_vl53l4cd_sensors, scan_i2c_bus
+from i2c_sensor import (
+    VL53L4CD,
+    discover_vl53l4cd_sensors,
+    scan_i2c_bus,
+    ensure_i2c_arm_baudrate,
+)
 
 
 MIN_I2C_ADDR = 0x08
@@ -30,6 +35,7 @@ MIN_OFFSET_TARGET_MM = 10
 MAX_OFFSET_TARGET_MM = 1000
 MIN_OFFSET_SAMPLES = 5
 MAX_OFFSET_SAMPLES = 255
+I2C_SPEED_HZ = 400_000
 
 
 def _parse_int(value: str) -> int:
@@ -249,6 +255,8 @@ def _list_devices(bus_num: int) -> None:
 
 def main() -> None:
     print("VL53L4CD fast setup utility")
+    if ensure_i2c_arm_baudrate(I2C_SPEED_HZ):
+        print(f"Updated boot config to set I2C speed to {I2C_SPEED_HZ} Hz. Reboot Raspberry Pi to apply.")
     bus_num = _prompt_int_with_default("I2C bus number [0..10] (default 1): ", 1, 0, 10)
     _list_devices(bus_num)
 

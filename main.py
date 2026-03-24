@@ -41,7 +41,7 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 # ── Constants ─────────────────────────────────────────────────────────────────
-POLL_INTERVAL_SEC = 0.1   # How often to read sensors (seconds)
+POLL_INTERVAL_SEC = 0.1   # Start-to-start interval for each sensor polling cycle (seconds)
 I2C_BUS = 1               # Raspberry Pi hardware I2C bus
 I2C_SPEED_HZ = 400_000
 DEFAULT_START_MODE = os.getenv("START_MODE", "joystick").strip().lower()
@@ -242,6 +242,7 @@ def main(start_mode: str):
     try:
         next_idle_log_at = time.monotonic() + IDLE_STATUS_LOG_SEC
         while _running:
+            cycle_started_at = time.monotonic()
             did_log_sensor_data = False
 
             # --- Read Sense HAT ---
@@ -303,7 +304,9 @@ def main(start_mode: str):
                     log.info("Loop alive: polling sensors.")
                 next_idle_log_at = time.monotonic() + IDLE_STATUS_LOG_SEC
 
-            time.sleep(POLL_INTERVAL_SEC)
+            remaining_sleep_s = POLL_INTERVAL_SEC - (time.monotonic() - cycle_started_at)
+            if remaining_sleep_s > 0:
+                time.sleep(remaining_sleep_s)
 
     finally:
         if sense is not None:

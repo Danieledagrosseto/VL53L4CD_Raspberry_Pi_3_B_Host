@@ -29,6 +29,7 @@ from i2c_sensor import (
     scan_i2c_bus,
     discover_vl53l4cd_sensors,
     ensure_i2c_arm_baudrate,
+    read_ranging_result_all,
 )
 
 # ── Logging ──────────────────────────────────────────────────────────────────
@@ -260,10 +261,13 @@ def main(start_mode: str):
                     log.error("Sense HAT read error: %s", exc)
 
             # --- Read external sensors ---
-            for sensor in external_sensors:
+            vl53l4cd_sensors = [sensor for sensor in external_sensors if isinstance(sensor, VL53L4CD)]
+            if vl53l4cd_sensors:
                 try:
-                    if isinstance(sensor, VL53L4CD):
-                        result = sensor.read_ranging_result()
+                    for sensor, result in zip(
+                        vl53l4cd_sensors,
+                        read_ranging_result_all(vl53l4cd_sensors, repetition_time_s=POLL_INTERVAL_SEC),
+                    ):
                         log.info(
                             "[VL53L4CD @ %s] distance=%d mm status=%d sigma=%d",
                             hex(sensor.address),
@@ -272,11 +276,17 @@ def main(start_mode: str):
                             result["sigma_mm_raw"],
                         )
                         did_log_sensor_data = True
-                    else:
-                        reading = sensor.read()
-                        log.info("[%s @ %s] raw bytes: %s",
-                                 sensor.name, hex(sensor.address), reading.hex())
-                        did_log_sensor_data = True
+                except OSError as exc:
+                    log.error("[VL53L4CD batch] I2C error: %s", exc)
+
+            for sensor in external_sensors:
+                if isinstance(sensor, VL53L4CD):
+                    continue
+                try:
+                    reading = sensor.read()
+                    log.info("[%s @ %s] raw bytes: %s",
+                             sensor.name, hex(sensor.address), reading.hex())
+                    did_log_sensor_data = True
                 except OSError as exc:
                     log.error("[%s] I2C error: %s", sensor.name, exc)
 

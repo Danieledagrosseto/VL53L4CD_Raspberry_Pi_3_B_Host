@@ -328,6 +328,80 @@ class VL53L4CD(I2CSensor):
             return fallback_s
         return max((self._detected_time_budget_ms + 20) / 1000.0, 0.02)
 
+    def _ensure_detected_time_budget_ms(self) -> Optional[int]:
+        """Populate the cached time budget from device config when needed."""
+        if self._detected_time_budget_ms is None:
+            self.read_config()
+        return self._detected_time_budget_ms
+
+    def _resolve_ranging_buffer(self, buf: bytes) -> bytes | bytearray | None:
+        """Convert a raw 15-byte reply into a terminal ranging payload."""
+        range_status = buf[2]
+        distance = (buf[0] << 8) | buf[1]
+
+        if distance == 0xFFFF:
+            return None
+
+        if range_status == 3:
+            data = bytearray(buf)
+            data[0] = 0x00
+            data[1] = 0x00
+            return data
+
+        if range_status == 4:
+            data = bytearray(buf)
+            data[0] = (self.MAX_RANGE_MM >> 8) & 0xFF
+            data[1] = self.MAX_RANGE_MM & 0xFF
+            return data
+
+        if range_status == 0 or range_status in self._WARNING_STATUSES:
+            return buf
+
+        return None
+
+    def _build_timeout_ranging_buffer(self, last_buf: Optional[bytes]) -> bytearray:
+        """Build the fallback payload used after polling timeout."""
+        data = bytearray(last_buf) if last_buf is not None else bytearray(15)
+        data[0] = (self.MAX_RANGE_MM >> 8) & 0xFF
+        data[1] = self.MAX_RANGE_MM & 0xFF
+        data[2] = 13
+        return data
+
+    def _parse_ranging_buffer(self, data: bytes | bytearray) -> dict[str, int]:
+        """Parse a terminal ranging payload into the public result shape."""
+        return {
+            "distance_mm": (data[0] << 8) | data[1],
+            "range_status": data[2],
+            "signal_rate_kcps_raw": (data[3] << 8) | data[4],
+            "ambient_rate_kcps_raw": (data[5] << 8) | data[6],
+            "sigma_mm_raw": (data[7] << 8) | data[8],
+            "ambient_per_spad_raw": (data[9] << 8) | data[10],
+            "signal_per_spad_raw": (data[11] << 8) | data[12],
+            "num_spads_raw": (data[13] << 8) | data[14],
+        }
+
+    def _poll_ranging_result(
+        self,
+        initial_wait_s: float,
+        poll_interval_s: float,
+        timeout_s: float,
+    ) -> dict[str, int]:
+        """Poll the response buffer until a terminal ranging state is reached."""
+        if initial_wait_s > 0:
+            time.sleep(initial_wait_s)
+
+        deadline = time.monotonic() + timeout_s
+        last_buf = None
+        while time.monotonic() < deadline:
+            buf = self.read(length=15)
+            last_buf = buf
+            data = self._resolve_ranging_buffer(buf)
+            if data is not None:
+                return self._parse_ranging_buffer(data)
+            time.sleep(poll_interval_s)
+
+        return self._parse_ranging_buffer(self._build_timeout_ranging_buffer(last_buf))
+
     def _write_cmd(self, command: int, payload: list[int] | None = None) -> None:
         """Write a command byte + optional payload to the sensor."""
         self.open()
@@ -383,62 +457,8 @@ class VL53L4CD(I2CSensor):
         Always returns a parsed result payload.
         """
         self.trigger_ranging(self.UNIT_MM)
-
-        # Initial wait — let sensor start the measurement before we start polling
-        time.sleep(initial_wait_s)
-
         resolved_timeout_s = timeout_s if timeout_s is not None else self._get_dynamic_timeout_s()
-        deadline = time.monotonic() + resolved_timeout_s
-        data = None
-        last_buf = None
-        while time.monotonic() < deadline:
-            buf = self.read(length=15)
-            last_buf = buf
-            range_status = buf[2]
-            distance = (buf[0] << 8) | buf[1]
-
-            # distance 0xFFFF means the response buffer is not yet filled.
-            if distance == 0xFFFF:
-                time.sleep(poll_interval_s)
-                continue
-
-            if range_status == 3:
-                data = bytearray(buf)
-                data[0] = 0x00
-                data[1] = 0x00
-                break
-
-            if range_status == 4:
-                # Out-of-limit phase is treated as sensor max range.
-                data = bytearray(buf)
-                data[0] = (self.MAX_RANGE_MM >> 8) & 0xFF
-                data[1] = self.MAX_RANGE_MM & 0xFF
-                break
-
-            # Accept valid and warning statuses.
-            if range_status == 0 or range_status in self._WARNING_STATUSES:
-                data = buf
-                break
-
-            time.sleep(poll_interval_s)
-
-        if data is None:
-            # Keep last diagnostics when possible, but force fallback distance.
-            data = bytearray(last_buf) if last_buf is not None else bytearray(15)
-            data[0] = (self.MAX_RANGE_MM >> 8) & 0xFF
-            data[1] = self.MAX_RANGE_MM & 0xFF
-            data[2] = 13
-
-        return {
-            "distance_mm": (data[0] << 8) | data[1],
-            "range_status": data[2],
-            "signal_rate_kcps_raw": (data[3] << 8) | data[4],
-            "ambient_rate_kcps_raw": (data[5] << 8) | data[6],
-            "sigma_mm_raw": (data[7] << 8) | data[8],
-            "ambient_per_spad_raw": (data[9] << 8) | data[10],
-            "signal_per_spad_raw": (data[11] << 8) | data[12],
-            "num_spads_raw": (data[13] << 8) | data[14],
-        }
+        return self._poll_ranging_result(initial_wait_s, poll_interval_s, resolved_timeout_s)
 
     def set_thresholds(self, sigma_mm: int, signal_kcps: int) -> None:
         """Set sigma/signal thresholds (command 0x07)."""
@@ -462,6 +482,73 @@ class VL53L4CD(I2CSensor):
         """Read response buffer from command protocol (register pointer 0x00)."""
         self.open()
         return bytes(self._smbus.read_i2c_block_data(self.address, 0x00, length))
+
+
+def read_ranging_result_all(
+    sensors: list[VL53L4CD],
+    repetition_time_s: float,
+    poll_interval_s: float = 0.005,
+) -> list[dict[str, int]]:
+    """
+    Trigger one ranging cycle on all VL53L4CD sensors and poll all results.
+
+    `repetition_time_s` is the requested cycle time in seconds. The helper will
+    still extend the polling window as needed to cover the longest configured
+    device timeout, avoiding false timeouts when a device time budget exceeds
+    the requested repetition interval.
+    """
+    if repetition_time_s <= 0:
+        raise ValueError(f"repetition_time_s must be > 0, got {repetition_time_s}")
+    if poll_interval_s <= 0:
+        raise ValueError(f"poll_interval_s must be > 0, got {poll_interval_s}")
+    if not sensors:
+        return []
+
+    longest_time_budget_s = 0.0
+    longest_timeout_s = repetition_time_s
+    for sensor in sensors:
+        time_budget_ms = sensor._ensure_detected_time_budget_ms()
+        if time_budget_ms is not None:
+            longest_time_budget_s = max(longest_time_budget_s, time_budget_ms / 1000.0)
+        longest_timeout_s = max(longest_timeout_s, sensor._get_dynamic_timeout_s())
+
+    for sensor in sensors:
+        sensor.trigger_ranging(sensor.UNIT_MM)
+
+    start_time = time.monotonic()
+    initial_wait_s = min(longest_time_budget_s, longest_timeout_s)
+    if initial_wait_s > 0:
+        time.sleep(initial_wait_s)
+
+    deadline = start_time + longest_timeout_s
+    results: list[Optional[dict[str, int]]] = [None] * len(sensors)
+    last_bufs: list[Optional[bytes]] = [None] * len(sensors)
+    pending = set(range(len(sensors)))
+
+    while pending and time.monotonic() < deadline:
+        resolved_any = False
+        for index in tuple(pending):
+            buf = sensors[index].read(length=15)
+            last_bufs[index] = buf
+            data = sensors[index]._resolve_ranging_buffer(buf)
+            if data is None:
+                continue
+            results[index] = sensors[index]._parse_ranging_buffer(data)
+            pending.remove(index)
+            resolved_any = True
+
+        if pending and not resolved_any:
+            remaining_s = deadline - time.monotonic()
+            if remaining_s <= 0:
+                break
+            time.sleep(min(poll_interval_s, remaining_s))
+
+    for index in pending:
+        results[index] = sensors[index]._parse_ranging_buffer(
+            sensors[index]._build_timeout_ranging_buffer(last_bufs[index])
+        )
+
+    return [result for result in results if result is not None]
 
 
 # ── Multi-sensor discovery ────────────────────────────────────────────────────

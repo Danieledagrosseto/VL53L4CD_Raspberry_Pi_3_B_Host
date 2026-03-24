@@ -491,9 +491,9 @@ def read_ranging_result_all(
     """
     Trigger one ranging cycle on all VL53L4CD sensors and poll all results.
 
-    The helper still guarantees at least the devices' remaining dynamic timeout
-    margin after that initial wait, avoiding false timeouts near the end of a
-    measurement cycle.
+    After waiting for the longest configured time budget, the helper still uses
+    the full dynamic timeout window for polling, matching the single-sensor
+    `read_ranging_result()` behaviour.
     """
     if poll_interval_s <= 0:
         raise ValueError(f"poll_interval_s must be > 0, got {poll_interval_s}")
@@ -501,20 +501,12 @@ def read_ranging_result_all(
         return []
 
     longest_time_budget_s = 0.0
-    longest_remaining_timeout_s = 0.0
+    longest_timeout_s = 0.0
     for sensor in sensors:
         time_budget_ms = sensor._ensure_detected_time_budget_ms()
         if time_budget_ms is not None:
             longest_time_budget_s = max(longest_time_budget_s, time_budget_ms / 1000.0)
-            longest_remaining_timeout_s = max(
-                longest_remaining_timeout_s,
-                max(sensor._get_dynamic_timeout_s() - (time_budget_ms / 1000.0), 0.0),
-            )
-        else:
-            longest_remaining_timeout_s = max(
-                longest_remaining_timeout_s,
-                sensor._get_dynamic_timeout_s(),
-            )
+        longest_timeout_s = max(longest_timeout_s, sensor._get_dynamic_timeout_s())
 
     for sensor in sensors:
         sensor.trigger_ranging(sensor.UNIT_MM)
@@ -523,7 +515,7 @@ def read_ranging_result_all(
     if initial_wait_s > 0:
         time.sleep(initial_wait_s)
 
-    poll_timeout_s = max(longest_remaining_timeout_s, poll_interval_s)
+    poll_timeout_s = max(longest_timeout_s, poll_interval_s)
     deadline = time.monotonic() + poll_timeout_s
     results: list[Optional[dict[str, int]]] = [None] * len(sensors)
     last_bufs: list[Optional[bytes]] = [None] * len(sensors)

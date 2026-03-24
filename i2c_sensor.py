@@ -486,21 +486,15 @@ class VL53L4CD(I2CSensor):
 
 def read_ranging_result_all(
     sensors: list[VL53L4CD],
-    repetition_time_s: float,
     poll_interval_s: float = 0.005,
 ) -> list[dict[str, int]]:
     """
     Trigger one ranging cycle on all VL53L4CD sensors and poll all results.
 
-    `repetition_time_s` is the post-trigger polling window in seconds after the
-    shared initial wait derived from the longest device time budget.
-
     The helper still guarantees at least the devices' remaining dynamic timeout
     margin after that initial wait, avoiding false timeouts near the end of a
     measurement cycle.
     """
-    if repetition_time_s <= 0:
-        raise ValueError(f"repetition_time_s must be > 0, got {repetition_time_s}")
     if poll_interval_s <= 0:
         raise ValueError(f"poll_interval_s must be > 0, got {poll_interval_s}")
     if not sensors:
@@ -529,7 +523,7 @@ def read_ranging_result_all(
     if initial_wait_s > 0:
         time.sleep(initial_wait_s)
 
-    poll_timeout_s = max(repetition_time_s, longest_remaining_timeout_s, poll_interval_s)
+    poll_timeout_s = max(longest_remaining_timeout_s, poll_interval_s)
     deadline = time.monotonic() + poll_timeout_s
     results: list[Optional[dict[str, int]]] = [None] * len(sensors)
     last_bufs: list[Optional[bytes]] = [None] * len(sensors)

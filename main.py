@@ -266,7 +266,7 @@ def main(start_mode: str):
                 try:
                     for sensor, result in zip(
                         vl53l4cd_sensors,
-                        read_ranging_result_all(vl53l4cd_sensors, repetition_time_s=POLL_INTERVAL_SEC),
+                        read_ranging_result_all(vl53l4cd_sensors),
                     ):
                         log.info(
                             "[VL53L4CD @ %s] distance=%d mm status=%d sigma=%d",

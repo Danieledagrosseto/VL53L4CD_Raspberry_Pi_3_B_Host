@@ -492,10 +492,12 @@ def read_ranging_result_all(
     """
     Trigger one ranging cycle on all VL53L4CD sensors and poll all results.
 
-    `repetition_time_s` is the requested cycle time in seconds. The helper will
-    still extend the polling window as needed to cover the longest configured
-    device timeout, avoiding false timeouts when a device time budget exceeds
-    the requested repetition interval.
+    `repetition_time_s` is the post-trigger polling window in seconds after the
+    shared initial wait derived from the longest device time budget.
+
+    The helper still guarantees at least the devices' remaining dynamic timeout
+    margin after that initial wait, avoiding false timeouts near the end of a
+    measurement cycle.
     """
     if repetition_time_s <= 0:
         raise ValueError(f"repetition_time_s must be > 0, got {repetition_time_s}")
@@ -505,22 +507,30 @@ def read_ranging_result_all(
         return []
 
     longest_time_budget_s = 0.0
-    longest_timeout_s = repetition_time_s
+    longest_remaining_timeout_s = 0.0
     for sensor in sensors:
         time_budget_ms = sensor._ensure_detected_time_budget_ms()
         if time_budget_ms is not None:
             longest_time_budget_s = max(longest_time_budget_s, time_budget_ms / 1000.0)
-        longest_timeout_s = max(longest_timeout_s, sensor._get_dynamic_timeout_s())
+            longest_remaining_timeout_s = max(
+                longest_remaining_timeout_s,
+                max(sensor._get_dynamic_timeout_s() - (time_budget_ms / 1000.0), 0.0),
+            )
+        else:
+            longest_remaining_timeout_s = max(
+                longest_remaining_timeout_s,
+                sensor._get_dynamic_timeout_s(),
+            )
 
     for sensor in sensors:
         sensor.trigger_ranging(sensor.UNIT_MM)
 
-    start_time = time.monotonic()
-    initial_wait_s = min(longest_time_budget_s, longest_timeout_s)
+    initial_wait_s = longest_time_budget_s
     if initial_wait_s > 0:
         time.sleep(initial_wait_s)
 
-    deadline = start_time + longest_timeout_s
+    poll_timeout_s = max(repetition_time_s, longest_remaining_timeout_s, poll_interval_s)
+    deadline = time.monotonic() + poll_timeout_s
     results: list[Optional[dict[str, int]]] = [None] * len(sensors)
     last_bufs: list[Optional[bytes]] = [None] * len(sensors)
     pending = set(range(len(sensors)))

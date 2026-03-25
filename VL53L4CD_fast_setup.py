@@ -46,6 +46,7 @@ def _parse_int(value: str) -> int:
 
 
 def _prompt_int(prompt: str, min_value: int, max_value: int) -> int:
+    # Generic bounded numeric prompt reused by all menu actions.
     while True:
         raw = input(prompt).strip()
         try:
@@ -94,6 +95,7 @@ def _change_address(bus_num: int) -> None:
         print("Current and new address are the same. Nothing to do.")
         return
 
+    # Firmware-specific address unlock/update sequence from command protocol.
     sequence = [0xA0, 0xAA, 0xA5, new_addr]
 
     if smbus2 is None:
@@ -116,7 +118,8 @@ def _change_address(bus_num: int) -> None:
 
     print(f"Address change sequence sent. New address should be {hex(new_addr)}")
 
-    # Verify by reading config from the new address.
+    # Verify by reading config from the new address to catch bus collisions,
+    # stale cabling, or unsuccessful EEPROM writes.
     sensor = VL53L4CD(bus=bus_num, address=new_addr)
     try:
         cfg = sensor.read_config()
@@ -144,7 +147,7 @@ def _change_time_budget(bus_num: int) -> None:
 
     sensor = VL53L4CD(bus=bus_num, address=addr)
     try:
-        # Requirement: intermeasurement is always 0.
+        # Project rule: inter-measurement stays at 0 for single-shot behaviour.
         sensor.set_timing(time_budget_ms=time_budget_ms, inter_measurement_ms=0)
         time.sleep(0.05)
         cfg = sensor.read_config()
@@ -178,6 +181,8 @@ def _change_offset(bus_num: int) -> None:
     )
 
     sensor = VL53L4CD(bus=bus_num, address=addr)
+    # Payload layout for CMD_OFFSET_CAL:
+    #   [target_hi, target_lo, samples_hi, samples_lo]
     payload = [(target_mm >> 8) & 0xFF, target_mm & 0xFF, (samples >> 8) & 0xFF, samples & 0xFF]
 
     try:
@@ -241,6 +246,8 @@ def _list_devices(bus_num: int) -> None:
             print("  No I2C devices found.")
         return
     for s in sensors:
+        # Read config for each discovered unit so operator sees current values
+        # before modifying addresses or timing.
         try:
             cfg = s.read_config()
             print(
@@ -257,6 +264,8 @@ def main() -> None:
     print("VL53L4CD fast setup utility")
     if ensure_i2c_arm_baudrate(I2C_SPEED_HZ):
         print(f"Updated boot config to set I2C speed to {I2C_SPEED_HZ} Hz. Reboot Raspberry Pi to apply.")
+    # Bus selection is prompted once and reused to reduce accidental edits on
+    # the wrong bus while running multiple operations in one session.
     bus_num = _prompt_int_with_default("I2C bus number [0..10] (default 1): ", 1, 0, 10)
     _list_devices(bus_num)
 

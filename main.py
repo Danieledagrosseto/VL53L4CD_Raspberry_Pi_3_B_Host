@@ -158,6 +158,11 @@ def setup_external_sensors(bus: int) -> list[I2CSensor]:
 # ── Main loop ─────────────────────────────────────────────────────────────────
 
 def main(start_mode: str):
+    # Startup sequence:
+    # 1) Validate/ensure I2C speed in boot config
+    # 2) Bring up Sense HAT if available
+    # 3) Discover and validate external VL53L4CD sensors
+    # 4) Enter acquisition loop based on selected start mode
     log.info("=== I2C Sensor Host Firmware starting ===")
     log.info("Startup mode: %s", start_mode)
 
@@ -242,6 +247,8 @@ def main(start_mode: str):
     try:
         next_idle_log_at = time.monotonic() + IDLE_STATUS_LOG_SEC
         while _running:
+            # We pace the loop using start-to-start timing, so each cycle tries
+            # to start every POLL_INTERVAL_SEC regardless of sensor read latency.
             cycle_started_at = time.monotonic()
             did_log_sensor_data = False
 
@@ -262,6 +269,8 @@ def main(start_mode: str):
                     log.error("Sense HAT read error: %s", exc)
 
             # --- Read external sensors ---
+            # Read VL53L4CD sensors as a coordinated batch so all devices are
+            # triggered and polled within one timing window.
             vl53l4cd_sensors = [sensor for sensor in external_sensors if isinstance(sensor, VL53L4CD)]
             if vl53l4cd_sensors:
                 try:
@@ -283,6 +292,7 @@ def main(start_mode: str):
             for sensor in external_sensors:
                 if isinstance(sensor, VL53L4CD):
                     continue
+                # Generic fallback path for any non-VL53L4CD sensor class.
                 try:
                     reading = sensor.read()
                     log.info("[%s @ %s] raw bytes: %s",
@@ -292,6 +302,8 @@ def main(start_mode: str):
                     log.error("[%s] I2C error: %s", sensor.name, exc)
 
             if not did_log_sensor_data and time.monotonic() >= next_idle_log_at:
+                # Keep periodic liveness logs when nothing was emitted in this
+                # cycle; this helps detect stalled-but-running deployments.
                 if sense is None and not external_sensors:
                     log.warning(
                         "Loop alive, but no active sensors: Sense HAT unavailable and no external I2C sensors discovered."
@@ -306,6 +318,7 @@ def main(start_mode: str):
 
             remaining_sleep_s = POLL_INTERVAL_SEC - (time.monotonic() - cycle_started_at)
             if remaining_sleep_s > 0:
+                # Sleep only the remaining slot to preserve the target cadence.
                 time.sleep(remaining_sleep_s)
 
     finally:
@@ -323,4 +336,6 @@ if __name__ == "__main__":
         help="Startup mode: joystick waits for press, immediate starts loop right away.",
     )
     args = parser.parse_args()
+    # CLI argument wins; when omitted, resolve_start_mode() falls back to
+    # START_MODE from environment, then to 'joystick'.
     main(start_mode=resolve_start_mode(args.start_mode))

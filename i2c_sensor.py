@@ -500,6 +500,9 @@ def read_ranging_result_all(
     if not sensors:
         return []
 
+    # Determine one shared wait window before first poll:
+    # - longest_time_budget_s: minimum time for the slowest configured sensor
+    # - longest_timeout_s: hard upper bound for the polling phase
     longest_time_budget_s = 0.0
     longest_timeout_s = 0.0
     for sensor in sensors:
@@ -508,6 +511,7 @@ def read_ranging_result_all(
             longest_time_budget_s = max(longest_time_budget_s, time_budget_ms / 1000.0)
         longest_timeout_s = max(longest_timeout_s, sensor._get_dynamic_timeout_s())
 
+    # Fire all sensors first so integration happens in parallel on-device.
     for sensor in sensors:
         sensor.trigger_ranging(sensor.UNIT_MM)
 
@@ -515,6 +519,7 @@ def read_ranging_result_all(
     if initial_wait_s > 0:
         time.sleep(initial_wait_s)
 
+    # Ensure at least one poll iteration by clamping timeout to poll interval.
     poll_timeout_s = max(longest_timeout_s, poll_interval_s)
     deadline = time.monotonic() + poll_timeout_s
     results: list[Optional[dict[str, int]]] = [None] * len(sensors)
@@ -534,11 +539,15 @@ def read_ranging_result_all(
             resolved_any = True
 
         if pending and not resolved_any:
+            # Back off only when no sensor produced a terminal result; this
+            # avoids unnecessary sleeps when at least one sensor is ready now.
             remaining_s = deadline - time.monotonic()
             if remaining_s <= 0:
                 break
             time.sleep(min(poll_interval_s, remaining_s))
 
+    # Any still-pending sensor is converted to explicit timeout status=13,
+    # preserving per-sensor debug bytes from the last observed payload.
     for index in pending:
         results[index] = sensors[index]._parse_ranging_buffer(
             sensors[index]._build_timeout_ranging_buffer(last_bufs[index])

@@ -12,6 +12,13 @@ Python host firmware that reads onboard Sense HAT sensors and an external VL53L4
 | Sense HAT — LSM9DS1 | 0x1C / 0x6A | 9-DoF IMU (magnetometer, accel, gyro) |
 | VL53L4CD breakout ×N | 0x70 default, configurable | Time-of-flight ranging (up to ~1300 mm), any number of units |
 
+For the VL53L4CD breakout, use external pull-ups by cutting the `J2` and `J3`
+jumper bridges (see [VL53L4CD_breakout_schematics.pdf](VL53L4CD_breakout_schematics.pdf)
+and [Pictures/bottom.jpg](Pictures/bottom.jpg)).
+
+When more than 5 sensors are connected to the same I2C bus, using external
+pull-up resistors is recommended.
+
 ## Project Structure
 
 ```
